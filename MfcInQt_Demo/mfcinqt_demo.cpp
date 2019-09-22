@@ -1,5 +1,5 @@
 #include "mfcinqt_demo.h"
-#include "crtdbg.h"
+//#include "crtdbg.h"
 
 #define FLUSH_PLOT_INTERVAL 10
 #define INPUT_RANGE			10
