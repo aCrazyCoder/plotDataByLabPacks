@@ -1,0 +1,5 @@
+<RCC>
+    <qresource prefix="/MfcInQt_Demo">
+        <file>Resources/plot.ico</file>
+    </qresource>
+</RCC>
