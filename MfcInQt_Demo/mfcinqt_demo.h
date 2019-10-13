@@ -27,9 +27,13 @@ private:
 	HANDLE m_hMap;
 	PUCHAR lpbMapAddress;
 
+	USHORT dataType;
+
 private slots:
 	void openFile();
-	void updatePlot();
+	void updateAllDataPlot();
+	void updateROIDataPlot();
+	void updateOBPDataPlot();
 
 protected:
 	void closeEvent(QCloseEvent *event);

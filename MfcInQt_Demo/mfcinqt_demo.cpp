@@ -1,25 +1,27 @@
 #include "mfcinqt_demo.h"
-//#include "crtdbg.h"
 
-#define FLUSH_PLOT_INTERVAL 10
-#define INPUT_RANGE			10
+#define FLUSH_PLOT_INTERVAL 3
+#define INPUT_RANGE			5.4
 #define VIEW_SIZE_OF_MAP	1
+#define ALL_DATA_ACQ		0
+#define ROI_ACQ				1
+#define ONBOARD_ACQ			2
 
 MfcInQt_Demo::MfcInQt_Demo(QWidget *parent, Qt::WFlags flags)
 	: QMainWindow(parent, flags)
 {
-	//_CrtSetBreakAlloc(21547);
 	ui.setupUi(this);
 	setWindowIcon(QIcon(":/MfcInQt_Demo/Resources/plot.ico"));
 	setWindowTitle("plotData");
 
 	timer = new QTimer(this);
-	connect(timer, SIGNAL(timeout()), this, SLOT(updatePlot()));
+	connect(timer, SIGNAL(timeout()), this, SLOT(updateAllDataPlot()));
 
 	m_hFile = 0;
 	m_hMap = 0;
 	lpbMapAddress = NULL;
 	dataFrame = 0;
+	dataType = 0;
 
 	HWND wnd = (HWND)ui.label->winId();
 
@@ -29,9 +31,9 @@ MfcInQt_Demo::MfcInQt_Demo(QWidget *parent, Qt::WFlags flags)
 	m_scope.Channels[1].Name = "CH1";
 	m_scope.Channels[2].Name = "CH2";
 	m_scope.Channels[3].Name = "CH3";
-	m_scope.SizeLimit = 1025;
+	m_scope.SizeLimit = 5121;
 	m_scope.XAxis.Max.Mode = mamOffset;
-	m_scope.XAxis.Max.Value = 1024;
+	m_scope.XAxis.Max.Value = 5120;
 	m_scope.XAxis.Max.AutoScale = false;
 
 	VCL_Loaded();
@@ -47,6 +49,32 @@ void MfcInQt_Demo::openFile()
 	QString fileName = QFileDialog::getOpenFileName(this, QString::fromLocal8Bit("选择文件"),
 													QDesktopServices::storageLocation(QDesktopServices::DesktopLocation),
 													QString("DAT(*.dat)"));
+	if (fileName.contains(QString::fromLocal8Bit("全采集")))
+	{
+		dataType = ALL_DATA_ACQ;
+		timer->disconnect(SIGNAL(timeout()));
+		connect(timer, SIGNAL(timeout()), this, SLOT(updateAllDataPlot()));
+		dataFrame = 0;
+	}
+	else if(fileName.contains(QString::fromLocal8Bit("ROI采集")))
+	{
+		dataType = ROI_ACQ;
+		timer->disconnect(SIGNAL(timeout()));
+		connect(timer, SIGNAL(timeout()), this, SLOT(updateROIDataPlot()));
+		dataFrame = 0;
+	}
+	else if (fileName.contains(QString::fromLocal8Bit("在板处理")))
+	{
+		dataType = ONBOARD_ACQ;
+		timer->disconnect(SIGNAL(timeout()));
+		connect(timer, SIGNAL(timeout()), this, SLOT(updateOBPDataPlot()));
+		dataFrame = 0;
+	}
+	else
+	{
+		QMessageBox::warning(this, "Exception", QString::fromLocal8Bit("请正确选择数据文件"));
+		return;
+	}
 	ui.file->setText(fileName);
 	LPCWSTR m_FileName = reinterpret_cast<const wchar_t *>(fileName.utf16());
 	m_hFile = CreateFile(m_FileName, GENERIC_READ, 0, NULL, OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
@@ -70,10 +98,11 @@ void MfcInQt_Demo::openFile()
 		CloseHandle(m_hFile);
 		return;
 	}
+	lpbMapAddress += 16384*2;
 	timer->start(FLUSH_PLOT_INTERVAL);
 }
 
-void MfcInQt_Demo::updatePlot()
+void MfcInQt_Demo::updateAllDataPlot()
 {
 	if (ui.CH0->isChecked())
 	{
@@ -114,6 +143,125 @@ void MfcInQt_Demo::updatePlot()
 	dataFrame++;
 	lpbMapAddress += 8;
 	if (dataFrame == VIEW_SIZE_OF_MAP*1024*1024/8)
+	{
+		timer->stop();
+	}
+}
+
+void MfcInQt_Demo::updateROIDataPlot()
+{
+	switch ((lpbMapAddress[3] & 0xF0) >> 4)
+	{
+	case 0:
+		if (ui.CH0->isChecked())
+		{
+			float a = (float)(lpbMapAddress[3] * 256 + lpbMapAddress[2]);
+			m_scope.Channels[0].Data.AddYPoint(a*INPUT_RANGE / 4096 - INPUT_RANGE / 2);
+		}
+		else
+		{
+			m_scope.Channels[0].Data.AddYPoint(0, true);
+		}
+		break;
+	case 1:
+		if (ui.CH1->isChecked())
+		{
+			float a = (float)(lpbMapAddress[3] * 256 + lpbMapAddress[2] - 4096);
+			m_scope.Channels[1].Data.AddYPoint(a*INPUT_RANGE / 4096 - INPUT_RANGE / 2);
+		}
+		else
+		{
+			m_scope.Channels[1].Data.AddYPoint(0, true);
+		}
+		break;
+	case 2:
+		if (ui.CH2->isChecked())
+		{
+			float a = (float)(lpbMapAddress[3] * 256 + lpbMapAddress[2] - 4096 * 2);
+			m_scope.Channels[2].Data.AddYPoint(a*INPUT_RANGE / 4096 - INPUT_RANGE / 2);
+		}
+		else
+		{
+			m_scope.Channels[2].Data.AddYPoint(0, true);
+		}
+		break;
+	case 3:
+		if (ui.CH3->isChecked())
+		{
+			float a = (float)(lpbMapAddress[3] * 256 + lpbMapAddress[2] - 4096 * 3);
+			m_scope.Channels[3].Data.AddYPoint(a*INPUT_RANGE / 4096 - INPUT_RANGE / 2);
+		}
+		else
+		{
+			m_scope.Channels[3].Data.AddYPoint(0, true);
+		}
+	default:
+		break;
+	}
+	dataFrame++;
+	lpbMapAddress += 8;
+	if (dataFrame == VIEW_SIZE_OF_MAP * 1024 * 1024 / 8)
+	{
+		timer->stop();
+	}
+}
+
+void MfcInQt_Demo::updateOBPDataPlot()
+{
+	if (lpbMapAddress[3] != 0)
+	{
+		switch ((lpbMapAddress[3] & 0xF0) >> 4)
+		{
+		case 0:
+			if (ui.CH0->isChecked())
+			{
+				float a = (float)(lpbMapAddress[3] * 256 + lpbMapAddress[2]);
+				m_scope.Channels[0].Data.AddYPoint(a*INPUT_RANGE / 4096);
+			}
+			else
+			{
+				m_scope.Channels[0].Data.AddYPoint(0, true);
+			}
+			break;
+		case 1:
+			if (ui.CH1->isChecked())
+			{
+				float a = (float)(lpbMapAddress[3] * 256 + lpbMapAddress[2] - 4096);
+				m_scope.Channels[1].Data.AddYPoint(a*INPUT_RANGE / 4096);
+			}
+			else
+			{
+				m_scope.Channels[1].Data.AddYPoint(0, true);
+			}
+			break;
+		case 2:
+			if (ui.CH2->isChecked())
+			{
+				float a = (float)(lpbMapAddress[3] * 256 + lpbMapAddress[2] - 4096 * 2);
+				m_scope.Channels[2].Data.AddYPoint(a*INPUT_RANGE / 4096);
+			}
+			else
+			{
+				m_scope.Channels[2].Data.AddYPoint(0, true);
+			}
+			break;
+		case 3:
+			if (ui.CH3->isChecked())
+			{
+				float a = (float)(lpbMapAddress[3] * 256 + lpbMapAddress[2] - 4096 * 3);
+				m_scope.Channels[3].Data.AddYPoint(a*INPUT_RANGE / 4096);
+			}
+			else
+			{
+				m_scope.Channels[3].Data.AddYPoint(0, true);
+			}
+		default:
+			break;
+		}
+		dataFrame++;
+	}
+	lpbMapAddress += 8;
+	if (dataFrame == VIEW_SIZE_OF_MAP * 1024 * 1024 / 8)
 	{
 		timer->stop();
 	}
